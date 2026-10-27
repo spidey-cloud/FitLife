@@ -17,6 +17,8 @@ object AppModule {
     @Provides @Singleton
     fun provideDatabase(@ApplicationContext ctx: Context): FitLifeDatabase =
         Room.databaseBuilder(ctx, FitLifeDatabase::class.java, "fitlife_v1.db")
+            .addMigrations(FitLifeDatabase.MIGRATION_1_2)
+            // Only used if a migration path is ever missing; real migrations above keep user data.
             .fallbackToDestructiveMigration()
             .build()
 
@@ -27,6 +29,7 @@ object AppModule {
     @Provides fun provideSleepDao(db: FitLifeDatabase)     = db.sleepDao()
     @Provides fun provideWellbeingDao(db: FitLifeDatabase) = db.wellbeingDao()
     @Provides fun provideProfileDao(db: FitLifeDatabase)   = db.profileDao()
+    @Provides fun provideRideDao(db: FitLifeDatabase)      = db.rideDao()
 
     // FoodRepository is NOT listed here — it uses @Inject constructor() directly
 }

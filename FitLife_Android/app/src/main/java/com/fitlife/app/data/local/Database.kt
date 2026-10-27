@@ -27,7 +27,8 @@ data class WorkoutEntity(
     val caloriesBurned: Int = 0,
     val notes: String = "",
     val completed: Boolean = false,
-    val templateId: Long? = null
+    val templateId: Long? = null,
+    val focus: String = ""                  // e.g. "Chest & Shoulders" (v2)
 )
 
 @Entity(tableName = "exercises")
@@ -40,7 +41,8 @@ data class ExerciseEntity(
     val weightKg: Float = 0f,
     val durationSeconds: Int = 0,
     val restSeconds: Int = 60,
-    val notes: String = ""
+    val notes: String = "",
+    val done: Boolean = false                // ticked off during a session (v2)
 )
 
 @Entity(tableName = "food_log")
@@ -105,7 +107,34 @@ data class UserProfileEntity(
     val dailyWaterGoal: Int = 8,
     val weightGoal: String = "maintain",  // lose, maintain, gain
     val activityLevel: String = "moderate",
-    val onboardingComplete: Boolean = false
+    val onboardingComplete: Boolean = false,
+    // ── v2 ──
+    val dailyRideGoalKm: Float = 20f,
+    val weeklyWorkoutGoal: Int = 4,
+    val themeMode: String = "system"        // system | light | dark
+)
+
+/**
+ * A recorded bike ride (v2). The GPS trace is stored compactly as
+ * "lat,lng,alt;lat,lng,alt;…" (down-sampled to ≤ 600 points) so no extra table is needed.
+ */
+@Entity(tableName = "rides")
+data class RideEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val date: String,                       // yyyy-MM-dd of the start
+    val title: String,
+    val startEpochMs: Long,
+    val endEpochMs: Long,
+    val movingSeconds: Long,
+    val distanceMeters: Float,
+    val avgSpeedKmh: Float,
+    val maxSpeedKmh: Float,
+    val minMovingSpeedKmh: Float,
+    val elevationGainM: Float,
+    val minAltitudeM: Float,
+    val maxAltitudeM: Float,
+    val calories: Int,
+    val route: String = ""
 )
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -167,6 +196,12 @@ interface WorkoutDao {
 
     @Query("DELETE FROM exercises WHERE workoutId = :workoutId")
     suspend fun deleteExercisesForWorkout(workoutId: Long)
+
+    @Query("SELECT * FROM exercises WHERE workoutId = :workoutId ORDER BY id")
+    suspend fun getExercises(workoutId: Long): List<ExerciseEntity>
+
+    @Query("UPDATE exercises SET done = :done WHERE id = :id")
+    suspend fun setExerciseDone(id: Long, done: Boolean)
 }
 
 @Dao
@@ -197,6 +232,9 @@ interface FoodLogDao {
 
     @Query("DELETE FROM food_log WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    @Query("SELECT * FROM food_log WHERE date >= :fromDate ORDER BY id DESC LIMIT 200")
+    fun observeRecent(fromDate: String): Flow<List<FoodLogEntity>>
 }
 
 @Dao
@@ -262,6 +300,30 @@ interface ProfileDao {
     suspend fun upsert(profile: UserProfileEntity)
 }
 
+@Dao
+interface RideDao {
+    @Query("SELECT * FROM rides ORDER BY startEpochMs DESC")
+    fun observeAll(): Flow<List<RideEntity>>
+
+    @Query("SELECT * FROM rides WHERE id = :id")
+    fun observeById(id: Long): Flow<RideEntity?>
+
+    @Query("SELECT * FROM rides WHERE id = :id")
+    suspend fun getById(id: Long): RideEntity?
+
+    @Query("SELECT MAX(distanceMeters) FROM rides WHERE id != :excludeId")
+    suspend fun longestDistanceExcluding(excludeId: Long): Float?
+
+    @Query("SELECT MAX(avgSpeedKmh) FROM rides WHERE id != :excludeId")
+    suspend fun fastestAvgExcluding(excludeId: Long): Float?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(ride: RideEntity): Long
+
+    @Query("DELETE FROM rides WHERE id = :id")
+    suspend fun deleteById(id: Long)
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // DATABASE
 // ═══════════════════════════════════════════════════════════════════════
@@ -275,9 +337,10 @@ interface ProfileDao {
         DietPlanEntity::class,
         SleepLogEntity::class,
         WellbeingLogEntity::class,
-        UserProfileEntity::class
+        UserProfileEntity::class,
+        RideEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class FitLifeDatabase : RoomDatabase() {
@@ -288,4 +351,40 @@ abstract class FitLifeDatabase : RoomDatabase() {
     abstract fun sleepDao(): SleepDao
     abstract fun wellbeingDao(): WellbeingDao
     abstract fun profileDao(): ProfileDao
+    abstract fun rideDao(): RideDao
+
+    companion object {
+        /**
+         * v1 → v2: adds cycling rides, exercise check-off, workout focus and new profile goals.
+         * Keeps all existing user data (previously any schema change wiped the database).
+         * Column definitions must match what Room generates for the entities above.
+         */
+        val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE exercises ADD COLUMN done INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE workouts ADD COLUMN focus TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE user_profile ADD COLUMN dailyRideGoalKm REAL NOT NULL DEFAULT 20.0")
+                db.execSQL("ALTER TABLE user_profile ADD COLUMN weeklyWorkoutGoal INTEGER NOT NULL DEFAULT 4")
+                db.execSQL("ALTER TABLE user_profile ADD COLUMN themeMode TEXT NOT NULL DEFAULT 'system'")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `rides` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`date` TEXT NOT NULL, " +
+                        "`title` TEXT NOT NULL, " +
+                        "`startEpochMs` INTEGER NOT NULL, " +
+                        "`endEpochMs` INTEGER NOT NULL, " +
+                        "`movingSeconds` INTEGER NOT NULL, " +
+                        "`distanceMeters` REAL NOT NULL, " +
+                        "`avgSpeedKmh` REAL NOT NULL, " +
+                        "`maxSpeedKmh` REAL NOT NULL, " +
+                        "`minMovingSpeedKmh` REAL NOT NULL, " +
+                        "`elevationGainM` REAL NOT NULL, " +
+                        "`minAltitudeM` REAL NOT NULL, " +
+                        "`maxAltitudeM` REAL NOT NULL, " +
+                        "`calories` INTEGER NOT NULL, " +
+                        "`route` TEXT NOT NULL)"
+                )
+            }
+        }
+    }
 }

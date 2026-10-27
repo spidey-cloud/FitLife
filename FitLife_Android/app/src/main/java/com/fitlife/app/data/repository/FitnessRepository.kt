@@ -31,13 +31,7 @@ class FitnessRepository @Inject constructor(
     suspend fun addStepsManually(date: String, count: Int) {
         val existing = db.stepsDao().getByDate(date)
             ?: DailyStepsEntity(date = date)
-        val updated = existing.copy(
-            steps = existing.steps + count,
-            caloriesBurned = ((existing.steps + count) * 0.04).toInt(),
-            distanceMeters = (existing.steps + count) * 0.762f,
-            activeMinutes = (existing.steps + count) / 100
-        )
-        db.stepsDao().upsert(updated)
+        db.stepsDao().upsert(stepsEntity(date, existing.steps + count, existing.syncedWithFit))
     }
 
     suspend fun syncStepsFromHealthConnect(): Int {
@@ -49,15 +43,7 @@ class FitnessRepository @Inject constructor(
             ?: DailyStepsEntity(date = today.toString())
         // Use whichever is higher — HC or local
         val best = maxOf(existing.steps, summary.steps)
-        db.stepsDao().upsert(
-            existing.copy(
-                steps = best,
-                caloriesBurned = (best * 0.04).toInt(),
-                distanceMeters = best * 0.762f,
-                activeMinutes = best / 100,
-                syncedWithFit = true
-            )
-        )
+        db.stepsDao().upsert(stepsEntity(today.toString(), best, synced = true))
         return best
     }
 
@@ -71,6 +57,9 @@ class FitnessRepository @Inject constructor(
             if (s != null && s.steps >= goal) {
                 streak++
                 checkDate = checkDate.minusDays(1)
+            } else if (i == 0) {
+                // Today isn't finished yet — don't break the streak before the day is over.
+                checkDate = checkDate.minusDays(1)
             } else break
         }
         return streak
@@ -81,23 +70,38 @@ class FitnessRepository @Inject constructor(
     fun observeAllWorkouts(): Flow<List<WorkoutEntity>> = db.workoutDao().observeAll()
     fun observeTodayWorkouts(date: String): Flow<List<WorkoutEntity>> = db.workoutDao().observeByDate(date)
     fun observeExercises(workoutId: Long): Flow<List<ExerciseEntity>> = db.workoutDao().observeExercises(workoutId)
+    suspend fun getExercises(workoutId: Long): List<ExerciseEntity> = db.workoutDao().getExercises(workoutId)
 
     suspend fun saveWorkout(workout: WorkoutEntity, exercises: List<ExerciseEntity>): Long {
         val id = db.workoutDao().insert(workout)
         exercises.forEach { db.workoutDao().insertExercise(it.copy(workoutId = id)) }
+        if (workout.completed) writeWorkoutToHealthConnect(workout)
         return id
     }
 
+    /** Re-inserts a deleted workout with its original ids (used by "Undo"). */
+    suspend fun restoreWorkout(workout: WorkoutEntity, exercises: List<ExerciseEntity>) {
+        db.workoutDao().insert(workout)
+        exercises.forEach { db.workoutDao().insertExercise(it) }
+    }
+
+    suspend fun setExerciseDone(exerciseId: Long, done: Boolean) =
+        db.workoutDao().setExerciseDone(exerciseId, done)
+
     suspend fun completeWorkout(workout: WorkoutEntity) {
         db.workoutDao().update(workout.copy(completed = true))
-        // Write to Health Connect
+        writeWorkoutToHealthConnect(workout)
+    }
+
+    private suspend fun writeWorkoutToHealthConnect(workout: WorkoutEntity) {
         if (hc.isAvailable && hc.hasAllPermissions()) {
             val now = Instant.now()
-            val start = now.minusSeconds(workout.durationMinutes * 60L)
+            val start = now.minusSeconds(workout.durationMinutes.coerceAtLeast(1) * 60L)
             val type = when (workout.category) {
                 "Cardio" -> ExerciseSessionRecord.EXERCISE_TYPE_RUNNING
                 "HIIT" -> ExerciseSessionRecord.EXERCISE_TYPE_HIGH_INTENSITY_INTERVAL_TRAINING
                 "Yoga" -> ExerciseSessionRecord.EXERCISE_TYPE_YOGA
+                "Flexibility" -> ExerciseSessionRecord.EXERCISE_TYPE_STRETCHING
                 else -> ExerciseSessionRecord.EXERCISE_TYPE_STRENGTH_TRAINING
             }
             hc.writeExerciseSession(workout.name, start, now, type)
@@ -113,6 +117,8 @@ class FitnessRepository @Inject constructor(
 
     fun observeFoodByDate(date: String): Flow<List<FoodLogEntity>> = db.foodLogDao().observeByDate(date)
     fun observeTotalCalories(date: String): Flow<Int?> = db.foodLogDao().observeTotalCalories(date)
+    fun observeRecentFoods(): Flow<List<FoodLogEntity>> =
+        db.foodLogDao().observeRecent(LocalDate.now().minusDays(30).toString())
 
     suspend fun logFood(food: FoodLogEntity): Long {
         val id = db.foodLogDao().insert(food)
@@ -129,6 +135,9 @@ class FitnessRepository @Inject constructor(
         }
         return id
     }
+
+    /** Re-inserts a removed entry locally only (no duplicate Health Connect record). */
+    suspend fun restoreFood(food: FoodLogEntity) { db.foodLogDao().insert(food) }
 
     suspend fun deleteFood(id: Long) = db.foodLogDao().deleteById(id)
 
@@ -147,6 +156,14 @@ class FitnessRepository @Inject constructor(
     suspend fun savePlan(plan: DietPlanEntity): Long {
         db.dietPlanDao().deactivateAll()
         return db.dietPlanDao().insert(plan.copy(isActive = true))
+    }
+
+    /** Updates an existing plan in place (keeps its active flag). */
+    suspend fun updatePlan(plan: DietPlanEntity) = db.dietPlanDao().update(plan)
+
+    suspend fun restorePlan(plan: DietPlanEntity) {
+        if (plan.isActive) db.dietPlanDao().deactivateAll()
+        db.dietPlanDao().insert(plan)
     }
 
     suspend fun activatePlan(id: Long) {
@@ -168,9 +185,53 @@ class FitnessRepository @Inject constructor(
     suspend fun getWellbeingByDate(date: String) = db.wellbeingDao().getByDate(date)
     suspend fun saveWellbeing(entry: WellbeingLogEntity) = db.wellbeingDao().upsert(entry)
 
+    // ── Cycling ───────────────────────────────────────────────────────────────
+
+    fun observeRides(): Flow<List<RideEntity>> = db.rideDao().observeAll()
+    fun observeRide(id: Long): Flow<RideEntity?> = db.rideDao().observeById(id)
+
+    /** Persists a finished ride and mirrors it to Health Connect as a biking session. */
+    suspend fun saveRide(ride: RideEntity): Long {
+        val id = db.rideDao().insert(ride)
+        if (hc.isAvailable && hc.hasAllPermissions()) {
+            hc.writeExerciseSession(
+                name = ride.title,
+                start = Instant.ofEpochMilli(ride.startEpochMs),
+                end = Instant.ofEpochMilli(ride.endEpochMs.coerceAtLeast(ride.startEpochMs + 1000)),
+                type = ExerciseSessionRecord.EXERCISE_TYPE_BIKING
+            )
+        }
+        return id
+    }
+
+    suspend fun restoreRide(ride: RideEntity) { db.rideDao().insert(ride) }
+    suspend fun deleteRide(id: Long) = db.rideDao().deleteById(id)
+
+    /** Personal-best labels earned by [ride] compared with all other rides. */
+    suspend fun personalBests(ride: RideEntity): List<String> {
+        val result = mutableListOf<String>()
+        val longest = db.rideDao().longestDistanceExcluding(ride.id)
+        val fastest = db.rideDao().fastestAvgExcluding(ride.id)
+        if (longest != null && ride.distanceMeters > longest) result += "Longest ride"
+        if (fastest != null && ride.avgSpeedKmh > fastest && ride.distanceMeters >= 1000f) result += "Fastest average speed"
+        return result
+    }
+
     // ── Health Connect helpers ────────────────────────────────────────────────
 
     val isHealthConnectAvailable get() = hc.isAvailable
     suspend fun hasHealthPermissions() = hc.hasAllPermissions()
     val healthPermissions get() = hc.requiredPermissions
+
+    companion object {
+        /** Single place for the steps → kcal / distance / active-minutes estimates. */
+        fun stepsEntity(date: String, steps: Int, synced: Boolean = false) = DailyStepsEntity(
+            date = date,
+            steps = steps,
+            caloriesBurned = (steps * 0.04).toInt(),
+            distanceMeters = steps * 0.762f,
+            activeMinutes = steps / 100,
+            syncedWithFit = synced
+        )
+    }
 }

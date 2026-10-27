@@ -1,271 +1,209 @@
 package com.fitlife.app.ui.screens
 
-import androidx.compose.animation.*
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.*
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fitlife.app.data.local.UserProfileEntity
+import com.fitlife.app.ui.components.*
+import com.fitlife.app.ui.theme.FitTheme
 import com.fitlife.app.ui.viewmodel.FitnessViewModel
 import java.time.LocalDate
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun OnboardingScreen(vm: FitnessViewModel) {
-    var step by remember { mutableIntStateOf(0) }
-    val totalSteps = 4
+    var step by rememberSaveable { mutableIntStateOf(0) }
+    var name by rememberSaveable { mutableStateOf("") }
+    var age by rememberSaveable { mutableStateOf("") }
+    var sex by rememberSaveable { mutableStateOf("Male") }
+    var height by rememberSaveable { mutableStateOf("") }
+    var weight by rememberSaveable { mutableStateOf("") }
+    var weightGoal by rememberSaveable { mutableStateOf("maintain") }
+    var activity by rememberSaveable { mutableStateOf("moderate") }
+    var stepGoal by rememberSaveable { mutableFloatStateOf(10000f) }
+    val total = 4
 
-    // Profile fields
-    var name by remember { mutableStateOf("") }
-    var age by remember { mutableStateOf("") }
-    var sex by remember { mutableStateOf("Male") }
-    var height by remember { mutableStateOf("") }
-    var weight by remember { mutableStateOf("") }
-    var weightGoal by remember { mutableStateOf("maintain") }
-    var activityLevel by remember { mutableStateOf("moderate") }
-    var stepGoal by remember { mutableFloatStateOf(10000f) }
+    val ageOk = age.isEmpty() || age.toIntOrNull() in 10..100
+    val heightOk = height.isEmpty() || height.toFloatOrNull()?.let { it in 100f..250f } == true
+    val weightOk = weight.isEmpty() || weight.replace(',', '.').toFloatOrNull()?.let { it in 25f..300f } == true
+    val canContinue = when (step) { 1 -> name.isNotBlank() && ageOk && heightOk && weightOk; else -> true }
 
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        Column(
-            Modifier.fillMaxSize().padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // Top progress dots
-            Spacer(Modifier.height(24.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                repeat(totalSteps) { i ->
-                    val active = i <= step
-                    Box(
-                        Modifier
-                            .height(4.dp)
-                            .width(if (i == step) 32.dp else 16.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(
-                                if (active) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.surfaceVariant
-                            )
-                    )
-                }
-            }
-            Spacer(Modifier.height(32.dp))
-
-            // Step content
-            AnimatedContent(targetState = step, transitionSpec = {
-                slideInHorizontally { it } + fadeIn() togetherWith slideOutHorizontally { -it } + fadeOut()
-            }, label = "ob_step") { currentStep ->
-                when (currentStep) {
-                    0 -> WelcomeStep()
-                    1 -> ProfileStep(name, age, sex, height, weight,
-                        onName={name=it}, onAge={age=it}, onSex={sex=it}, onHeight={height=it}, onWeight={weight=it})
-                    2 -> GoalStep(weightGoal, activityLevel, onGoal={weightGoal=it}, onActivity={activityLevel=it})
-                    3 -> StepGoalStep(stepGoal, onSlider={stepGoal=it})
-                }
-            }
-
-            Spacer(Modifier.weight(1f))
-
-            // Navigation buttons
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (step > 0) {
-                    OutlinedButton(onClick = { step-- }, Modifier.weight(1f)) { Text("Back") }
-                }
-                Button(
-                    onClick = {
-                        if (step < totalSteps - 1) {
-                            step++
-                        } else {
-                            val profile = UserProfileEntity(
-                                name = name.ifBlank { "Friend" },
-                                dateOfBirth = "${LocalDate.now().year - (age.toIntOrNull() ?: 25)}-01-01",
-                                sex = sex,
-                                heightCm = height.toFloatOrNull() ?: 170f,
-                                weightKg = weight.toFloatOrNull() ?: 70f,
-                                dailyStepGoal = stepGoal.toInt(),
-                                weightGoal = weightGoal,
-                                activityLevel = activityLevel,
-                                onboardingComplete = true
-                            )
-                            vm.completeOnboarding(profile)
-                        }
-                    },
-                    modifier = Modifier.weight(if (step > 0) 1f else Float.MAX_VALUE)
-                ) {
-                    Text(if (step < totalSteps - 1) "Continue" else "Start FitLife 🎉",
-                        fontWeight = FontWeight.SemiBold)
-                }
-            }
-            Spacer(Modifier.height(24.dp))
-        }
-    }
-}
-
-@Composable
-private fun WelcomeStep() {
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Spacer(Modifier.height(16.dp))
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.primaryContainer,
-            modifier = Modifier.size(88.dp)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Text("F", fontSize = 44.sp, fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary)
-            }
-        }
-        Spacer(Modifier.height(28.dp))
-        Text("Welcome to FitLife", style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(12.dp))
-        Text("Your all-in-one fitness companion.\nSteps · Workouts · Calories · Diet · Wellbeing",
-            style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 24.sp)
-        Spacer(Modifier.height(36.dp))
-        FeatureRow(Icons.Outlined.DirectionsWalk, "Step Counter", "Track steps with Google Health Connect")
-        FeatureRow(Icons.Outlined.FitnessCenter, "Workout Planner", "Log exercises and track progress")
-        FeatureRow(Icons.Outlined.Restaurant, "Calorie & Diet", "Monitor nutrition and macro targets")
-        FeatureRow(Icons.Outlined.Favorite, "Digital Wellbeing", "Sleep, mood, water and mindfulness")
-    }
-}
-
-@Composable
-private fun FeatureRow(icon: ImageVector, title: String, sub: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(40.dp)) {
-            Box(contentAlignment = Alignment.Center) { Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp)) }
-        }
-        Spacer(Modifier.width(14.dp))
-        Column {
-            Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-            Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-@Composable
-private fun ProfileStep(name:String, age:String, sex:String, height:String, weight:String,
-                        onName:(String)->Unit, onAge:(String)->Unit, onSex:(String)->Unit,
-                        onHeight:(String)->Unit, onWeight:(String)->Unit) {
-    Column(Modifier.fillMaxWidth()) {
-        Text("Tell us about you", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
-        Text("We'll personalise your goals and calorie targets.",
-            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(24.dp))
-
-        OutlinedTextField(name, onName, label = { Text("Your name") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-        Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedTextField(age, onAge, label = { Text("Age") }, modifier = Modifier.weight(1f), singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-            Column(Modifier.weight(1f)) {
-                Text("Sex", style = MaterialTheme.typography.labelMedium)
-                Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("Male","Female").forEach { s ->
-                        FilterChip(selected = sex == s, onClick = { onSex(s) }, label = { Text(s) })
-                    }
-                }
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedTextField(height, onHeight, label = { Text("Height (cm)") }, modifier = Modifier.weight(1f), singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-            OutlinedTextField(weight, onWeight, label = { Text("Weight (kg)") }, modifier = Modifier.weight(1f), singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-        }
-    }
-}
-
-@Composable
-private fun GoalStep(weightGoal:String, activityLevel:String, onGoal:(String)->Unit, onActivity:(String)->Unit) {
-    Column(Modifier.fillMaxWidth()) {
-        Text("Your fitness goal", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
-        Text("We'll set your daily calorie target accordingly.",
-            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(24.dp))
-
-        listOf(
-            Triple("lose","🔥 Lose Weight","Calorie deficit · burn more than you eat"),
-            Triple("maintain","⚖️ Maintain Weight","Stay balanced · eat at your TDEE"),
-            Triple("gain","💪 Build Muscle","Calorie surplus · fuel your gains"),
-        ).forEach { (key, title, sub) ->
-            Card(
-                onClick = { onGoal(key) },
-                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                shape = RoundedCornerShape(14.dp),
-                border = if (weightGoal == key) CardDefaults.outlinedCardBorder() else null,
-                colors = CardDefaults.cardColors(
-                    containerColor = if (weightGoal == key) MaterialTheme.colorScheme.primaryContainer.copy(.4f)
-                    else MaterialTheme.colorScheme.surface)
-            ) {
-                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(title.take(2), fontSize = 28.sp)
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text(title.drop(3), fontWeight = FontWeight.SemiBold)
-                        Text(sub, style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Spacer(Modifier.weight(1f))
-                    if (weightGoal == key)
-                        Icon(Icons.Outlined.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
-                }
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-        Text("Activity level", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(8.dp))
+    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding().padding(24.dp)) {
+        // Progress dots
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("sedentary" to "Sedentary","light" to "Light","moderate" to "Moderate","active" to "Active").forEach { (k,l) ->
-                FilterChip(selected = activityLevel == k, onClick = { onActivity(k) }, label = { Text(l) })
+            repeat(total) { i ->
+                Box(
+                    Modifier.height(6.dp).width(if (i == step) 28.dp else 12.dp).clip(CircleShape)
+                        .background(if (i <= step) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+                )
             }
+        }
+        Spacer(Modifier.height(24.dp))
+
+        AnimatedContent(
+            targetState = step,
+            transitionSpec = { (slideInHorizontally { it / 4 } + fadeIn()) togetherWith fadeOut() },
+            label = "onboarding",
+            modifier = Modifier.weight(1f)
+        ) { s ->
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                when (s) {
+                    0 -> Welcome()
+                    1 -> {
+                        Title("Tell us about you", "We use this to personalise goals and calorie targets. It never leaves your phone.")
+                        OutlinedTextField(name, { name = it.take(40) }, label = { Text("Your name") }, singleLine = true,
+                            modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium)
+                        Spacer(Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            OutlinedTextField(age, { v -> age = v.filter(Char::isDigit).take(3) }, label = { Text("Age") }, singleLine = true,
+                                isError = !ageOk, modifier = Modifier.weight(1f), shape = MaterialTheme.shapes.medium,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                            OutlinedTextField(height, { v -> height = v.filter(Char::isDigit).take(3) }, label = { Text("Height") },
+                                suffix = { Text("cm") }, singleLine = true, isError = !heightOk, modifier = Modifier.weight(1f),
+                                shape = MaterialTheme.shapes.medium, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                            OutlinedTextField(weight, { v -> weight = v.filter { it.isDigit() || it == '.' || it == ',' }.take(5) },
+                                label = { Text("Weight") }, suffix = { Text("kg") }, singleLine = true, isError = !weightOk,
+                                modifier = Modifier.weight(1f), shape = MaterialTheme.shapes.medium,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                        }
+                        Spacer(Modifier.height(16.dp))
+                        Eyebrow("Sex (used by the calorie formula)")
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("Male", "Female").forEach { o ->
+                                FilterChip(selected = sex == o, onClick = { sex = o }, label = { Text(o) }, shape = CircleShape)
+                            }
+                        }
+                    }
+                    2 -> {
+                        Title("Your goal", "Sets your daily calorie target.")
+                        listOf(
+                            Triple("lose", "🔥 Lose weight", "Gentle deficit · about −500 kcal/day"),
+                            Triple("maintain", "⚖️ Maintain", "Eat at your maintenance calories"),
+                            Triple("gain", "💪 Build muscle", "Small surplus · about +300 kcal/day"),
+                        ).forEach { (k, t, sub) ->
+                            ChoiceCard(t, sub, selected = weightGoal == k) { weightGoal = k }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        Eyebrow("Activity level")
+                        Spacer(Modifier.height(8.dp))
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("sedentary" to "Sedentary", "light" to "Light", "moderate" to "Moderate", "active" to "Active", "very_active" to "Very active")
+                                .forEach { (k, l) -> FilterChip(selected = activity == k, onClick = { activity = k }, label = { Text(l) }, shape = CircleShape) }
+                        }
+                    }
+                    else -> {
+                        Title("Daily step goal", "You can change this any time in your profile.")
+                        Text(fmtInt(stepGoal.toInt()), style = MaterialTheme.typography.displayMedium,
+                            color = FitTheme.colors.steps, modifier = Modifier.align(Alignment.CenterHorizontally))
+                        Text("steps per day", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.align(Alignment.CenterHorizontally))
+                        Spacer(Modifier.height(16.dp))
+                        Slider(value = stepGoal, onValueChange = { stepGoal = (it / 500f).toInt() * 500f }, valueRange = 3000f..25000f)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                            listOf(5000, 7500, 10000, 15000).forEach { v ->
+                                FilterChip(selected = stepGoal.toInt() == v, onClick = { stepGoal = v.toFloat() },
+                                    label = { Text(fmtInt(v)) }, shape = CircleShape)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (step > 0) SecondaryButton("Back", onClick = { step-- }, modifier = Modifier.weight(1f))
+            Button(
+                onClick = {
+                    if (step < total - 1) step++
+                    else vm.completeOnboarding(
+                        UserProfileEntity(
+                            name = name.trim().ifBlank { "Friend" },
+                            dateOfBirth = "${LocalDate.now().year - (age.toIntOrNull() ?: 25)}-01-01",
+                            sex = sex,
+                            heightCm = height.toFloatOrNull() ?: 170f,
+                            weightKg = weight.replace(',', '.').toFloatOrNull() ?: 70f,
+                            dailyStepGoal = stepGoal.toInt(),
+                            weightGoal = weightGoal,
+                            activityLevel = activity,
+                            onboardingComplete = true
+                        )
+                    )
+                },
+                enabled = canContinue,
+                modifier = Modifier.weight(if (step > 0) 1.4f else 1f).heightIn(min = 56.dp),
+                shape = CircleShape
+            ) { Text(if (step < total - 1) "Continue" else "Start FitLife 🎉", style = MaterialTheme.typography.titleMedium) }
         }
     }
 }
 
 @Composable
-private fun StepGoalStep(stepGoal: Float, onSlider: (Float) -> Unit) {
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("Daily step goal", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+private fun Welcome() {
+    val c = FitTheme.colors
+    Column(Modifier.fillMaxWidth().padding(top = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier.size(96.dp).clip(MaterialTheme.shapes.extraLarge)
+                .background(Brush.linearGradient(listOf(c.heroStart, c.heroEnd))),
+            contentAlignment = Alignment.Center
+        ) { Text("F", fontSize = 48.sp, style = MaterialTheme.typography.displayMedium, color = c.onHero) }
+        Spacer(Modifier.height(28.dp))
+        Text("Welcome to FitLife", style = MaterialTheme.typography.headlineLarge, textAlign = TextAlign.Center)
         Spacer(Modifier.height(8.dp))
-        Text("You can change this anytime in your profile.",
-            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center)
-        Spacer(Modifier.height(40.dp))
-        Text("%,d".format(stepGoal.toInt()), style = MaterialTheme.typography.displayMedium,
-            fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-        Text("steps per day", style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(24.dp))
-        Slider(value = stepGoal, onValueChange = onSlider, valueRange = 3000f..25000f, steps = 43,
-            modifier = Modifier.fillMaxWidth())
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("3,000", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("25,000", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Spacer(Modifier.height(24.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            listOf(5000, 7500, 10000, 15000).forEach { v ->
-                AssistChip(onClick = { onSlider(v.toFloat()) },
-                    label = { Text("%,d".format(v)) })
+        Text("Steps, workouts, rides, nutrition and wellbeing — in one calm place.",
+            style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(28.dp))
+        listOf("👟" to "Automatic step counting", "🚴" to "GPS ride tracking, even offline", "🥗" to "Calorie & macro tracking", "🔒" to "Private — data stays on your phone")
+            .forEach { (e, t) ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconBadge(color = MaterialTheme.colorScheme.primary, emoji = e, size = 40.dp)
+                    Spacer(Modifier.width(14.dp))
+                    Text(t, style = MaterialTheme.typography.titleSmall)
+                }
             }
+    }
+}
+
+@Composable
+private fun Title(title: String, subtitle: String) {
+    Text(title, style = MaterialTheme.typography.headlineLarge)
+    Spacer(Modifier.height(6.dp))
+    Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Spacer(Modifier.height(24.dp))
+}
+
+@Composable
+private fun ChoiceCard(title: String, sub: String, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = MaterialTheme.shapes.large,
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+        border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) MaterialTheme.colorScheme.primary else FitTheme.colors.cardBorder),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

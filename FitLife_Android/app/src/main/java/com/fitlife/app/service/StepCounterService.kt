@@ -1,8 +1,11 @@
 package com.fitlife.app.service
 
+import android.Manifest
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -10,11 +13,16 @@ import android.hardware.SensorManager
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
 import com.fitlife.app.MainActivity
-import com.fitlife.app.data.local.DailyStepsEntity
+import com.fitlife.app.R
 import com.fitlife.app.data.local.FitLifeDatabase
+import com.fitlife.app.data.repository.FitnessRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.LocalDate
 import javax.inject.Inject
 
@@ -22,8 +30,10 @@ import javax.inject.Inject
  * Foreground service that registers the hardware step-counter sensor
  * and persists step counts to Room automatically all day.
  *
- * Android's TYPE_STEP_COUNTER gives the total steps since last reboot.
- * We store the "offset" (value at midnight) and subtract it to get today's steps.
+ * Android's TYPE_STEP_COUNTER gives the total steps since last reboot. v2 counts the
+ * **difference between consecutive sensor readings** and adds it to today's row. Before v2
+ * the service stored an offset; a service restart then reset today's count to 0 and every
+ * sensor event overwrote steps the user had added manually.
  */
 @AndroidEntryPoint
 class StepCounterService : Service(), SensorEventListener {
@@ -33,32 +43,52 @@ class StepCounterService : Service(), SensorEventListener {
     private lateinit var sensorManager: SensorManager
     private var stepSensor: Sensor? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val writeLock = Mutex()
 
-    // The raw sensor value recorded at the start of today
-    private var todayOffset: Int = -1
-    private var lastSavedDate: String = ""
+    /** Last raw sensor value seen by this service instance (-1 = none yet). */
+    private var lastSensorTotal: Int = -1
+    private var lastNotifiedSteps: Int = -1
 
     companion object {
         const val CHANNEL_ID = "fitlife_steps_service"
         const val NOTIF_ID = 9001
 
+        /** Starts the service only if step counting is permitted (required for the health FGS type). */
         fun start(context: Context) {
+            if (!hasActivityPermission(context)) return
             val intent = Intent(context, StepCounterService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                context.startForegroundService(intent)
-            else
-                context.startService(intent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                    context.startForegroundService(intent)
+                else
+                    context.startService(intent)
+            } catch (e: Exception) {
+                // e.g. ForegroundServiceStartNotAllowedException when started from the background
+            }
         }
 
         fun stop(context: Context) {
             context.stopService(Intent(context, StepCounterService::class.java))
         }
+
+        fun hasActivityPermission(context: Context): Boolean =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) ==
+                PackageManager.PERMISSION_GRANTED
     }
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(NOTIF_ID, buildNotification(0))
+        try {
+            ServiceCompat.startForeground(
+                this, NOTIF_ID, buildNotification(0),
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH else 0
+            )
+        } catch (e: Exception) {
+            stopSelf(); return
+        }
         initSensor()
     }
 
@@ -72,47 +102,31 @@ class StepCounterService : Service(), SensorEventListener {
 
     override fun onSensorChanged(event: SensorEvent) {
         if (event.sensor.type != Sensor.TYPE_STEP_COUNTER) return
-
         val totalSinceReboot = event.values[0].toInt()
-        val today = LocalDate.now().toString()
 
         scope.launch {
-            val dao = database.stepsDao()
+            writeLock.withLock {
+                // First reading after (re)start: only establish the baseline.
+                if (lastSensorTotal < 0) { lastSensorTotal = totalSinceReboot; return@withLock }
+                // Counter goes backwards only after a reboot — then all of it is new.
+                val delta = if (totalSinceReboot >= lastSensorTotal) totalSinceReboot - lastSensorTotal
+                            else totalSinceReboot
+                lastSensorTotal = totalSinceReboot
+                if (delta <= 0) return@withLock
 
-            // Reset offset at midnight (new day)
-            if (today != lastSavedDate) {
-                todayOffset = totalSinceReboot
-                lastSavedDate = today
-            }
-
-            // First reading of the day — set offset from DB or sensor
-            if (todayOffset == -1) {
+                val today = LocalDate.now().toString()
+                val dao = database.stepsDao()
                 val existing = dao.getByDate(today)
-                todayOffset = if (existing != null && existing.steps > 0) {
-                    totalSinceReboot - existing.steps
-                } else {
-                    totalSinceReboot
-                }
-                lastSavedDate = today
-            }
+                val todaySteps = (existing?.steps ?: 0) + delta
+                dao.upsert(FitnessRepository.stepsEntity(today, todaySteps, existing?.syncedWithFit ?: false))
 
-            val todaySteps = (totalSinceReboot - todayOffset).coerceAtLeast(0)
-
-            val entity = DailyStepsEntity(
-                date = today,
-                steps = todaySteps,
-                caloriesBurned = (todaySteps * 0.04).toInt(),
-                distanceMeters = todaySteps * 0.762f,
-                activeMinutes = todaySteps / 100,
-                syncedWithFit = false
-            )
-            dao.upsert(entity)
-
-            // Update notification every 500 steps
-            if (todaySteps % 500 == 0 || todaySteps < 10) {
-                withContext(Dispatchers.Main) {
-                    val nm = getSystemService(NotificationManager::class.java)
-                    nm.notify(NOTIF_ID, buildNotification(todaySteps))
+                // Refresh the ongoing notification roughly every 100 steps
+                if (lastNotifiedSteps < 0 || todaySteps - lastNotifiedSteps >= 100 || todaySteps < lastNotifiedSteps) {
+                    lastNotifiedSteps = todaySteps
+                    withContext(Dispatchers.Main) {
+                        val nm = getSystemService(NotificationManager::class.java)
+                        nm.notify(NOTIF_ID, buildNotification(todaySteps))
+                    }
                 }
             }
         }
@@ -124,7 +138,7 @@ class StepCounterService : Service(), SensorEventListener {
 
     override fun onDestroy() {
         super.onDestroy()
-        sensorManager.unregisterListener(this)
+        if (::sensorManager.isInitialized) sensorManager.unregisterListener(this)
         scope.cancel()
     }
 
@@ -153,7 +167,7 @@ class StepCounterService : Service(), SensorEventListener {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("FitLife — Step Tracker")
             .setContentText("%,d steps today".format(steps))
-            .setSmallIcon(android.R.drawable.ic_menu_compass)
+            .setSmallIcon(R.drawable.ic_stat_fitlife)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setSilent(true)

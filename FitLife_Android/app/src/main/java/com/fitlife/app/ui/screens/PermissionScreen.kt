@@ -3,158 +3,76 @@ package com.fitlife.app.ui.screens
 import android.Manifest
 import android.os.Build
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.google.accompanist.permissions.*
+import com.fitlife.app.ui.components.*
+import com.fitlife.app.ui.theme.FitTheme
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.isGranted
+import com.google.accompanist.permissions.rememberMultiplePermissionsState
 
+/**
+ * Asks for the permissions needed on day one. Location is deliberately NOT requested here:
+ * it is asked for just-in-time when the user starts their first ride.
+ */
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
-fun PermissionScreen(onAllGranted: () -> Unit) {
-
-    // Build the list of permissions we need
-    val permissions = mutableListOf(Manifest.permission.ACTIVITY_RECOGNITION)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+fun PermissionScreen(onDone: () -> Unit) {
+    val permissions = buildList {
+        // ACTIVITY_RECOGNITION only exists as a runtime permission from Android 10.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) add(Manifest.permission.ACTIVITY_RECOGNITION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
     }
+    if (permissions.isEmpty()) { LaunchedEffect(Unit) { onDone() }; return }
 
-    val multiplePermissionsState = rememberMultiplePermissionsState(permissions) { results ->
-        // Called when user responds — proceed regardless (app works without notifications)
-        if (results[Manifest.permission.ACTIVITY_RECOGNITION] == true) {
-            onAllGranted()
-        }
-    }
+    val state = rememberMultiplePermissionsState(permissions) { onDone() }
+    LaunchedEffect(state.allPermissionsGranted) { if (state.allPermissionsGranted) onDone() }
 
-    // If already granted, skip straight to app
-    LaunchedEffect(multiplePermissionsState.allPermissionsGranted) {
-        if (multiplePermissionsState.allPermissionsGranted) onAllGranted()
-    }
+    fun granted(p: String) = state.permissions.firstOrNull { it.permission == p }?.status?.isGranted == true
 
     Column(
-        Modifier.fillMaxSize().padding(28.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+        Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.Center
     ) {
-        // Logo
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.primaryContainer,
-            modifier = Modifier.size(80.dp)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Text("F", fontSize = 40.sp, fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary)
-            }
-        }
-
-        Spacer(Modifier.height(28.dp))
-        Text("Permissions needed", style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+        Text("A couple of permissions", style = MaterialTheme.typography.headlineLarge)
         Spacer(Modifier.height(8.dp))
-        Text("FitLife needs these to track your steps automatically and send reminders.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center)
+        Text("FitLife works without them, but these make tracking automatic.",
+            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(24.dp))
 
-        Spacer(Modifier.height(32.dp))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) PermissionRow("👟", "Physical activity",
+            "Counts your steps with the phone's step sensor.", granted(Manifest.permission.ACTIVITY_RECOGNITION))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) PermissionRow("🔔", "Notifications",
+            "Step and water reminders, plus live stats while a ride records.", granted(Manifest.permission.POST_NOTIFICATIONS))
+        PermissionRow("📍", "Location — later", "Asked only when you start your first ride. Used only while recording.", null)
 
-        // Permission items
-        PermissionItem(
-            icon = Icons.Outlined.DirectionsWalk,
-            title = "Physical Activity",
-            description = "Required to count your steps automatically using the phone sensor.",
-            granted = multiplePermissionsState.permissions
-                .firstOrNull { it.permission == Manifest.permission.ACTIVITY_RECOGNITION }
-                ?.status?.isGranted ?: false
-        )
-
-        Spacer(Modifier.height(12.dp))
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            PermissionItem(
-                icon = Icons.Outlined.Notifications,
-                title = "Notifications",
-                description = "For step goal reminders, water reminders and weekly summaries.",
-                granted = multiplePermissionsState.permissions
-                    .firstOrNull { it.permission == Manifest.permission.POST_NOTIFICATIONS }
-                    ?.status?.isGranted ?: false
-            )
-            Spacer(Modifier.height(12.dp))
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        // Grant button
-        Button(
-            onClick = { multiplePermissionsState.launchMultiplePermissionRequest() },
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-            shape = RoundedCornerShape(14.dp)
-        ) {
-            Icon(Icons.Outlined.CheckCircle, null, Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("Grant Permissions", fontWeight = FontWeight.SemiBold)
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        // Skip — app still works, just no auto steps or notifications
-        TextButton(onClick = onAllGranted) {
+        Spacer(Modifier.height(24.dp))
+        PrimaryButton("Allow", onClick = { state.launchMultiplePermissionRequest() })
+        Spacer(Modifier.height(8.dp))
+        TextButton(onClick = onDone, modifier = Modifier.align(Alignment.CenterHorizontally)) {
             Text("Skip for now", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
 @Composable
-private fun PermissionItem(
-    icon: ImageVector,
-    title: String,
-    description: String,
-    granted: Boolean
-) {
-    Card(
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (granted) MaterialTheme.colorScheme.primaryContainer.copy(.3f)
-                             else MaterialTheme.colorScheme.surface
-        ),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = if (granted) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier.size(44.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(icon, null,
-                        tint = if (granted) MaterialTheme.colorScheme.primary
-                               else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(22.dp))
-                }
-            }
+private fun PermissionRow(emoji: String, title: String, body: String, granted: Boolean?) {
+    FitCard(Modifier.fillMaxWidth().padding(bottom = 10.dp), contentPadding = PaddingValues(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconBadge(color = MaterialTheme.colorScheme.primary, emoji = emoji)
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.SemiBold,
-                    style = MaterialTheme.typography.bodyMedium)
-                Text(description, style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Spacer(Modifier.width(8.dp))
-            if (granted) {
-                Icon(Icons.Outlined.CheckCircle, "Granted",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp))
-            }
+            if (granted == true) Icon(Icons.Filled.CheckCircle, "Granted", tint = FitTheme.colors.success)
         }
     }
 }

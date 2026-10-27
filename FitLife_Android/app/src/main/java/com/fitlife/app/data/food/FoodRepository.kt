@@ -4,11 +4,23 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import javax.inject.Inject
 import javax.inject.Singleton
+import javax.net.ssl.HttpsURLConnection
 
+/**
+ * A food that can be logged.
+ *
+ * Nutrition values are either **per 100 g** ([per100g] = true, e.g. "Chicken Breast (grilled, 100g)"
+ * and all Open Food Facts results) or **per listed portion** ([per100g] = false, e.g.
+ * "Egg (whole, 1 large)", "Milk (whole, 250ml)"). The UI scales by grams for the former and by
+ * number of portions for the latter. Before v2 every food was scaled by grams, which gave
+ * wrong numbers for portion-based foods.
+ */
 data class FoodItem(
     val name: String,
     val calories: Int,
@@ -18,7 +30,36 @@ data class FoodItem(
     val servingG: Float = 100f,
     val brand: String = "",
     val source: String = "local"   // "local" | "api"
-)
+) {
+    val per100g: Boolean
+        get() = source == "api" || PER_100G.containsMatchIn(name)
+
+    /** Human label of the base portion: "100 g", "1 large", "250ml", "1 scoop 30g"… */
+    val portionLabel: String
+        get() = if (per100g) "100 g"
+        else PORTION.find(name)?.groupValues?.get(1)?.substringAfterLast(", ")?.trim() ?: "1 serving"
+
+    /**
+     * Name without the portion part: "Tuna (canned in water, 100g)" → "Tuna (canned in water)",
+     * "Egg White (1 large)" → "Egg White".
+     */
+    val displayName: String
+        get() {
+            if (source == "api") return name
+            val m = PORTION.find(name) ?: return name
+            val inner = m.groupValues[1]
+            val head = name.substring(0, m.range.first).trimEnd()
+            return if (inner.contains(", ")) "$head (${inner.substringBeforeLast(", ")})" else head.ifBlank { name }
+        }
+
+    private companion object {
+        val PER_100G = Regex("""\b100\s?g\b""", RegexOption.IGNORE_CASE)
+        val PORTION = Regex("""\(([^()]*)\)\s*$""")
+    }
+}
+
+/** Result of an online search; [failed] lets the UI show an "offline" hint instead of "no results". */
+data class ApiSearchResult(val items: List<FoodItem>, val failed: Boolean)
 
 @Singleton
 class FoodRepository @Inject constructor() {
@@ -157,46 +198,89 @@ class FoodRepository @Inject constructor() {
     }
 
     // ── Open Food Facts API ───────────────────────────────────────────────────
-    // Searches the free Open Food Facts public API (no key needed)
+    // Searches the free Open Food Facts public API (no key needed).
+    //
+    // Hardening (v2):
+    //  • HTTPS only — the connection is rejected if it is not an HttpsURLConnection
+    //  • connect/read timeouts so a slow or hostile server can't hang the search forever
+    //  • response size capped at 1 MB to avoid memory exhaustion
+    //  • query trimmed, control characters stripped and length-limited before encoding
+    //  • identifying User-Agent as requested by the Open Food Facts API terms
+    //  • only the exception class is logged (never the query, which may be personal)
 
-    suspend fun searchApi(query: String): List<FoodItem> = withContext(Dispatchers.IO) {
-        if (query.length < 3) return@withContext emptyList()
-        return@withContext try {
-            val encoded = URLEncoder.encode(query, "UTF-8")
-            val url = "https://world.openfoodfacts.org/cgi/search.pl" +
+    suspend fun searchApi(query: String): List<FoodItem> = searchApiDetailed(query).items
+
+    suspend fun searchApiDetailed(query: String): ApiSearchResult = withContext(Dispatchers.IO) {
+        val q = sanitizeQuery(query)
+        if (q.length < 3) return@withContext ApiSearchResult(emptyList(), failed = false)
+        var conn: HttpURLConnection? = null
+        try {
+            val encoded = URLEncoder.encode(q, "UTF-8")
+            val url = URL(
+                "https://world.openfoodfacts.org/cgi/search.pl" +
                     "?search_terms=$encoded" +
                     "&search_simple=1" +
                     "&action=process" +
                     "&json=1" +
                     "&page_size=8" +
                     "&fields=product_name,brands,nutriments,serving_size"
-            val response = URL(url).readText()
-            parseApiResponse(response)
+            )
+            conn = (url.openConnection() as? HttpsURLConnection)
+                ?: throw SecurityException("Refusing non-HTTPS connection")
+            conn.connectTimeout = TIMEOUT_MS
+            conn.readTimeout = TIMEOUT_MS
+            // Same-protocol redirects only: HttpURLConnection never follows HTTPS → HTTP.
+            conn.instanceFollowRedirects = true
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("User-Agent", USER_AGENT)
+            conn.setRequestProperty("Accept", "application/json")
+            if (conn.responseCode != HttpURLConnection.HTTP_OK)
+                return@withContext ApiSearchResult(emptyList(), failed = true)
+            val body = conn.inputStream.use { input ->
+                val out = ByteArrayOutputStream()
+                val buf = ByteArray(8 * 1024)
+                var total = 0
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    total += n
+                    if (total > MAX_RESPONSE_BYTES) throw IllegalStateException("Response too large")
+                    out.write(buf, 0, n)
+                }
+                out.toString("UTF-8")
+            }
+            ApiSearchResult(parseApiResponse(body), failed = false)
         } catch (e: Exception) {
-            Log.w("FoodRepo", "API search failed: ${e.message}")
-            emptyList()
+            Log.w("FoodRepo", "API search failed: ${e.javaClass.simpleName}")
+            ApiSearchResult(emptyList(), failed = true)
+        } finally {
+            conn?.disconnect()
         }
     }
 
+    private fun sanitizeQuery(query: String): String =
+        query.filterNot { it.isISOControl() }.trim().take(MAX_QUERY_LENGTH)
+
     private fun parseApiResponse(json: String): List<FoodItem> {
+        // Values coming from the network are clamped so a malformed record can't poison totals.
         return try {
             val root = JSONObject(json)
             val products = root.getJSONArray("products")
             val results = mutableListOf<FoodItem>()
             for (i in 0 until products.length()) {
                 val p = products.getJSONObject(i)
-                val name = p.optString("product_name", "").trim()
-                val brand = p.optString("brands", "").trim()
+                val name = p.optString("product_name", "").trim().take(80)
+                val brand = p.optString("brands", "").trim().substringBefore(",").take(40)
                 val n = p.optJSONObject("nutriments") ?: continue
                 val cal = n.optDouble("energy-kcal_100g", -1.0)
-                if (name.isBlank() || cal < 0) continue
+                if (name.isBlank() || cal < 0 || cal > 900 || cal.isNaN()) continue
                 results.add(
                     FoodItem(
                         name    = if (brand.isNotEmpty()) "$name ($brand)" else name,
                         calories = cal.toInt(),
-                        proteinG = n.optDouble("proteins_100g", 0.0).toFloat(),
-                        carbsG   = n.optDouble("carbohydrates_100g", 0.0).toFloat(),
-                        fatG     = n.optDouble("fat_100g", 0.0).toFloat(),
+                        proteinG = n.optDouble("proteins_100g", 0.0).clampMacro(),
+                        carbsG   = n.optDouble("carbohydrates_100g", 0.0).clampMacro(),
+                        fatG     = n.optDouble("fat_100g", 0.0).clampMacro(),
                         servingG = 100f,
                         brand    = brand,
                         source   = "api"
@@ -217,5 +301,15 @@ class FoodRepository @Inject constructor() {
         // Merge, deduplicate by name prefix
         val merged = (local + api).distinctBy { it.name.lowercase().take(20) }
         return merged.take(10)
+    }
+
+    private fun Double.clampMacro(): Float =
+        if (isNaN() || this < 0) 0f else coerceAtMost(100.0).toFloat()
+
+    private companion object {
+        const val TIMEOUT_MS = 8_000
+        const val MAX_RESPONSE_BYTES = 1_000_000
+        const val MAX_QUERY_LENGTH = 100
+        const val USER_AGENT = "FitLife-Android/1.0 (personal fitness app)"
     }
 }

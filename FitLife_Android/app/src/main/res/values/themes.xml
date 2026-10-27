@@ -1,3 +1,8 @@
 <resources>
-    <style name="Theme.FitLife" parent="android:Theme.Material.Light.NoActionBar"/>
+    <!-- Window theme shown before Compose draws: matches Kinetic Clarity (light). -->
+    <style name="Theme.FitLife" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/fit_background</item>
+        <item name="android:statusBarColor">@color/fit_background</item>
+        <item name="android:navigationBarColor">@color/fit_background</item>
+    </style>
 </resources>

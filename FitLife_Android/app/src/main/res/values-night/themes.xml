@@ -1,0 +1,8 @@
+<resources>
+    <!-- Window theme shown before Compose draws: matches Night Ride (dark). -->
+    <style name="Theme.FitLife" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/fit_background</item>
+        <item name="android:statusBarColor">@color/fit_background</item>
+        <item name="android:navigationBarColor">@color/fit_background</item>
+    </style>
+</resources>

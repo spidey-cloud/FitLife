@@ -13,8 +13,8 @@ android {
         applicationId = "com.fitlife.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -60,6 +60,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.activity:activity-compose:1.9.2")
+    // ServiceCompat.startForeground(..., type) and STOP_FOREGROUND_REMOVE need core 1.12+
+    implementation("androidx.core:core-ktx:1.13.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
@@ -83,15 +85,12 @@ dependencies {
 
     implementation("androidx.work:work-runtime-ktx:2.9.1")
 
-    implementation("androidx.datastore:datastore-preferences:1.1.1")
-
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
     implementation("com.google.accompanist:accompanist-permissions:0.36.0")
 
-    implementation("io.coil-kt:coil-compose:2.7.0")
-
-    implementation("com.patrykandpatrick.vico:compose-m3:1.15.0")
+    // Pure-JVM unit tests (ride maths)
+    testImplementation("junit:junit:4.13.2")
 }
 
 kapt { correctErrorTypes = true }

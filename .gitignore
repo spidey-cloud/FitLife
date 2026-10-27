@@ -37,3 +37,12 @@ Desktop.ini
 # Gradle
 .gradle/
 FitLife_Android/gradle/wrapper/gradle-wrapper.jar
+
+# Release outputs (baseline-profile .dm files, output metadata) — build artefacts, never commit
+FitLife_Android/app/release/
+*.dm
+
+# Signing material (sensitive) — keep out of version control
+*.jks
+*.keystore
+keystore.properties

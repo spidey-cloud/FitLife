@@ -1,5 +1,6 @@
 package com.fitlife.app.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -9,23 +10,31 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Straighten
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.fitlife.app.data.repository.bodyProfile
+import com.fitlife.app.data.steps.StepMath
 import com.fitlife.app.ui.components.*
 import com.fitlife.app.ui.theme.FitTheme
 import com.fitlife.app.ui.viewmodel.FitnessViewModel
 import java.time.LocalDate
 import java.time.format.TextStyle
 import java.util.Locale
+import kotlin.math.roundToInt
 
 @Composable
-fun ActivityScreen(vm: FitnessViewModel) {
+fun ActivityScreen(vm: FitnessViewModel, onOpenProfile: () -> Unit = {}) {
     val s by vm.stepsState.collectAsState()
+    val profileState by vm.profileState.collectAsState()
+    val body = profileState.profile.bodyProfile()
+    val stride = remember(body) { StepMath.strideMeters(body) }
     val c = FitTheme.colors
     var showManual by remember { mutableStateOf(false) }
 
@@ -76,6 +85,26 @@ fun ActivityScreen(vm: FitnessViewModel) {
                     StatBlock("Distance", fmt1(s.todayDistanceKm), unit = "km")
                     StatBlock("Burned", fmtInt(s.todayCaloriesBurned), unit = "kcal", color = c.burn)
                     StatBlock("Active", "${s.todayActiveMinutes}", unit = "min")
+                }
+                Spacer(Modifier.height(14.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                // Shows exactly what the distance & kcal are based on, and where to change it.
+                Row(
+                    Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small)
+                        .clickable(onClickLabel = "Edit body measurements", onClick = onOpenProfile)
+                        .padding(top = 10.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Outlined.Straighten, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Personalised: ${(stride * 100).roundToInt()} cm stride · ${fmtInt(body.weightKg.roundToInt())} kg · " +
+                            "${body.ageYears} y",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text("Edit", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                 }
             }
         }

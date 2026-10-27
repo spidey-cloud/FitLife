@@ -3,6 +3,8 @@ package com.fitlife.app.data.repository
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import com.fitlife.app.data.healthconnect.HealthConnectManager
 import com.fitlife.app.data.local.*
+import com.fitlife.app.data.steps.BodyProfile
+import com.fitlife.app.data.steps.StepMath
 import kotlinx.coroutines.flow.Flow
 import java.time.Instant
 import java.time.LocalDate
@@ -19,7 +21,15 @@ class FitnessRepository @Inject constructor(
 
     fun observeProfile(): Flow<UserProfileEntity?> = db.profileDao().observe()
     suspend fun getProfile(): UserProfileEntity? = db.profileDao().get()
-    suspend fun saveProfile(profile: UserProfileEntity) = db.profileDao().upsert(profile)
+    suspend fun saveProfile(profile: UserProfileEntity) {
+        val before = getProfile()?.bodyProfile()
+        db.profileDao().upsert(profile)
+        // Height / weight / sex / age changed → every stored day's distance & kcal changes too.
+        if (before != profile.bodyProfile()) recalculateStepMetrics()
+    }
+
+    /** The current user's body measurements (defaults until onboarding is done). */
+    suspend fun bodyProfile(): BodyProfile = getProfile()?.bodyProfile() ?: BodyProfile.DEFAULT
 
     // ── Steps ─────────────────────────────────────────────────────────────────
 
@@ -31,7 +41,7 @@ class FitnessRepository @Inject constructor(
     suspend fun addStepsManually(date: String, count: Int) {
         val existing = db.stepsDao().getByDate(date)
             ?: DailyStepsEntity(date = date)
-        db.stepsDao().upsert(stepsEntity(date, existing.steps + count, existing.syncedWithFit))
+        db.stepsDao().upsert(stepsEntity(date, existing.steps + count, bodyProfile(), existing.syncedWithFit))
     }
 
     suspend fun syncStepsFromHealthConnect(): Int {
@@ -43,8 +53,27 @@ class FitnessRepository @Inject constructor(
             ?: DailyStepsEntity(date = today.toString())
         // Use whichever is higher — HC or local
         val best = maxOf(existing.steps, summary.steps)
-        db.stepsDao().upsert(stepsEntity(today.toString(), best, synced = true))
+        db.stepsDao().upsert(stepsEntity(today.toString(), best, bodyProfile(), synced = true))
         return best
+    }
+
+    /**
+     * Re-derives distance / kcal / active minutes for every stored day from its step count and
+     * the current profile. Only rows whose values actually change are written, and a row is
+     * skipped if its step count changed while we were computing. Returns the rows updated.
+     */
+    suspend fun recalculateStepMetrics(): Int {
+        val body = bodyProfile()
+        var updated = 0
+        for (row in db.stepsDao().getAll()) {
+            val m = StepMath.metrics(row.steps, body)
+            val same = row.caloriesBurned == m.activeKcal && row.activeMinutes == m.activeMinutes &&
+                kotlin.math.abs(row.distanceMeters - m.distanceMeters) < 0.5f
+            if (!same) updated += db.stepsDao().updateMetricsIfStepsUnchanged(
+                row.date, row.steps, m.activeKcal, m.distanceMeters, m.activeMinutes
+            )
+        }
+        return updated
     }
 
     suspend fun computeStreak(): Int {
@@ -224,14 +253,24 @@ class FitnessRepository @Inject constructor(
     val healthPermissions get() = hc.requiredPermissions
 
     companion object {
-        /** Single place for the steps → kcal / distance / active-minutes estimates. */
-        fun stepsEntity(date: String, steps: Int, synced: Boolean = false) = DailyStepsEntity(
-            date = date,
-            steps = steps,
-            caloriesBurned = (steps * 0.04).toInt(),
-            distanceMeters = steps * 0.762f,
-            activeMinutes = steps / 100,
-            syncedWithFit = synced
-        )
+        /**
+         * Single place that turns a step count into a stored day, personalised for [body]
+         * (stride from height & sex, energy from weight, height, age & sex — see [StepMath]).
+         */
+        fun stepsEntity(date: String, steps: Int, body: BodyProfile, synced: Boolean = false): DailyStepsEntity {
+            val m = StepMath.metrics(steps, body)
+            return DailyStepsEntity(
+                date = date,
+                steps = m.steps,
+                caloriesBurned = m.activeKcal,
+                distanceMeters = m.distanceMeters,
+                activeMinutes = m.activeMinutes,
+                syncedWithFit = synced
+            )
+        }
     }
 }
+
+/** Maps the stored profile to the measurements the step / energy maths needs. */
+fun UserProfileEntity.bodyProfile(): BodyProfile =
+    BodyProfile.of(heightCm = heightCm, weightKg = weightKg, sex = sex, dateOfBirth = dateOfBirth)

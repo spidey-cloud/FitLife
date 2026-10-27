@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.fitlife.app.data.local.*
 import com.fitlife.app.data.repository.FitnessRepository
+import com.fitlife.app.data.repository.bodyProfile
+import com.fitlife.app.data.steps.StepMath
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -151,6 +153,9 @@ class FitnessViewModel @Inject constructor(
         observeCalories()
         observeDiet()
         observeWellbeing()
+        // Bring days stored by older versions (or before the profile was filled in)
+        // in line with the personalised step maths. Cheap no-op when nothing changed.
+        viewModelScope.launch { repo.recalculateStepMetrics() }
     }
 
     // ── Profile ───────────────────────────────────────────────────────────────
@@ -193,11 +198,7 @@ class FitnessViewModel @Inject constructor(
 
     /** Revised Harris-Benedict BMR × activity factor, adjusted for the weight goal. */
     fun computeTdee(p: UserProfileEntity): Int {
-        val age = p.dateOfBirth.take(4).toIntOrNull()?.let { LocalDate.now().year - it } ?: 25
-        val bmr = if (p.sex == "Male")
-            88.36 + (13.4 * p.weightKg.toDouble()) + (4.8 * p.heightCm.toDouble()) - (5.7 * age)
-        else
-            447.6 + (9.2 * p.weightKg.toDouble()) + (3.1 * p.heightCm.toDouble()) - (4.3 * age)
+        val bmr = StepMath.bmrKcalPerDay(p.bodyProfile())   // same BMR the step kcal use
         val multiplier = when (p.activityLevel) {
             "sedentary" -> 1.2
             "light" -> 1.375

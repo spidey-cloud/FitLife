@@ -160,6 +160,19 @@ interface StepsDao {
 
     @Query("SELECT COUNT(*) FROM daily_steps WHERE steps >= :goal AND date >= :fromDate")
     suspend fun daysGoalMetSince(goal: Int, fromDate: String): Int
+
+    @Query("SELECT * FROM daily_steps")
+    suspend fun getAll(): List<DailyStepsEntity>
+
+    /**
+     * Rewrites only the derived columns, and only if the step count is still [steps] — so a
+     * recalculation can never overwrite steps the counter service added in the meantime.
+     */
+    @Query(
+        "UPDATE daily_steps SET caloriesBurned = :kcal, distanceMeters = :distanceM, activeMinutes = :minutes " +
+        "WHERE date = :date AND steps = :steps"
+    )
+    suspend fun updateMetricsIfStepsUnchanged(date: String, steps: Int, kcal: Int, distanceM: Float, minutes: Int): Int
 }
 
 @Dao

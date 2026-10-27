@@ -16,6 +16,12 @@
 ### 🚶 Steps & Activity
 - A hardware step-counter foreground service (counts deltas, so a reboot won't drop or double-count steps)
 - Goal ring, distance and calories burned, a 7-day **Activity Trend** chart and recent history with goal ticks
+- **Personalised for each person** (`data/steps/StepMath.kt`, unit-tested). Nothing is a fixed number for everyone:
+  - **Distance** = steps × *your* stride, which is height × 0.415 (men) or × 0.413 (women)
+  - **Pace** = stride × 100 steps/min, so a longer stride means a faster walk
+  - **Active kcal** = (walking MET for that pace − 1) × *your* resting burn rate (revised Harris-Benedict BMR from weight, height, age and sex) × walking time
+  - The Activity screen shows what the numbers are based on ("71 cm stride · 70 kg · 30 y") with a link to edit them
+  - Changing height, weight, sex or birth year recalculates every stored day; the step counts themselves are never changed
 - **Manual step entry** sheet with a date picker and +500 / +1,000 / +2,500 presets
 - Two-way **Health Connect** sync
 
@@ -152,7 +158,8 @@ FitLife_Android/app/src/
 │   │   ├── repository/FitnessRepository.kt
 │   │   ├── food/FoodRepository.kt      # Offline foods + hardened Open Food Facts client
 │   │   ├── healthconnect/HealthConnectManager.kt
-│   │   └── ride/RideMath.kt, RideTracker.kt   # Ride engine
+│   │   ├── ride/RideMath.kt, RideTracker.kt   # Ride engine
+│   │   └── steps/StepMath.kt           # Personalised stride / distance / kcal
 │   ├── service/StepCounterService.kt, RideTrackingService.kt
 │   ├── worker/Workers.kt               # Sync + reminders
 │   └── ui/
@@ -162,7 +169,7 @@ FitLife_Android/app/src/
 │       └── screens/                    # Today, Activity, Workout, Cycling, ActiveRide, RideSummary,
 │                                       # Nutrition, DietPlans, Wellbeing, Profile, Onboarding, Permission
 ├── main/res/                           # fonts, xml security configs, icons, themes
-└── test/java/com/fitlife/app/data/ride/  # RideMathTest, RideTrackerTest
+└── test/java/com/fitlife/app/data/      # ride/RideMathTest, ride/RideTrackerTest, steps/StepMathTest
 ```
 
 ---

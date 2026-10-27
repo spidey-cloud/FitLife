@@ -208,7 +208,7 @@ private fun MainApp(
                     onOpenProfile = { nav.navigate(Routes.PROFILE) }
                 )
             }
-            composable(Routes.ACTIVITY) { ActivityScreen(vm) }
+            composable(Routes.ACTIVITY) { ActivityScreen(vm, onOpenProfile = { nav.navigate(Routes.PROFILE) }) }
             composable(Routes.WORKOUT) { WorkoutScreen(vm) }
             composable(Routes.RIDE) {
                 CyclingScreen(

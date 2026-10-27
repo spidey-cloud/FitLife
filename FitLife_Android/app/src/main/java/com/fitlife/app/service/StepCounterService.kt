@@ -19,6 +19,8 @@ import com.fitlife.app.MainActivity
 import com.fitlife.app.R
 import com.fitlife.app.data.local.FitLifeDatabase
 import com.fitlife.app.data.repository.FitnessRepository
+import com.fitlife.app.data.repository.bodyProfile
+import com.fitlife.app.data.steps.BodyProfile
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
@@ -48,6 +50,9 @@ class StepCounterService : Service(), SensorEventListener {
     /** Last raw sensor value seen by this service instance (-1 = none yet). */
     private var lastSensorTotal: Int = -1
     private var lastNotifiedSteps: Int = -1
+
+    /** The user's measurements, kept current from the profile table (used for distance / kcal). */
+    @Volatile private var body: BodyProfile = BodyProfile.DEFAULT
 
     companion object {
         const val CHANNEL_ID = "fitlife_steps_service"
@@ -89,6 +94,9 @@ class StepCounterService : Service(), SensorEventListener {
         } catch (e: Exception) {
             stopSelf(); return
         }
+        scope.launch {
+            database.profileDao().observe().collect { body = it?.bodyProfile() ?: BodyProfile.DEFAULT }
+        }
         initSensor()
     }
 
@@ -118,7 +126,7 @@ class StepCounterService : Service(), SensorEventListener {
                 val dao = database.stepsDao()
                 val existing = dao.getByDate(today)
                 val todaySteps = (existing?.steps ?: 0) + delta
-                dao.upsert(FitnessRepository.stepsEntity(today, todaySteps, existing?.syncedWithFit ?: false))
+                dao.upsert(FitnessRepository.stepsEntity(today, todaySteps, body, existing?.syncedWithFit ?: false))
 
                 // Refresh the ongoing notification roughly every 100 steps
                 if (lastNotifiedSteps < 0 || todaySteps - lastNotifiedSteps >= 100 || todaySteps < lastNotifiedSteps) {

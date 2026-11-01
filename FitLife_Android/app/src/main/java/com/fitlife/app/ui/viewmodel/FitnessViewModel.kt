@@ -104,6 +104,10 @@ class FitnessViewModel @Inject constructor(
     private val _message = MutableSharedFlow<String>()
     val message: SharedFlow<String> = _message.asSharedFlow()
 
+    fun postMessage(msg: String) = viewModelScope.launch {
+        _message.emit(msg)
+    }
+
     init {
         observeProfile()
         observeSteps()
@@ -140,6 +144,21 @@ class FitnessViewModel @Inject constructor(
     fun completeOnboarding(profile: UserProfileEntity) = viewModelScope.launch {
         val tdee = computeTdee(profile)
         repo.saveProfile(profile.copy(onboardingComplete = true, dailyCalorieGoal = tdee))
+    }
+
+    fun connectGoogleFitAndSkip() = viewModelScope.launch {
+        val profile = UserProfileEntity(
+            name = "Google Fit User",
+            weightKg = 70f,
+            heightCm = 170f,
+            dailyStepGoal = 10000,
+            onboardingComplete = true
+        )
+        repo.saveProfile(profile)
+        repo.syncStepsFromHealthConnect()
+        val bmi = 70f / ((170f/100f)*(170f/100f))
+        _profile.update { it.copy(profile = profile, bmi = bmi, tdee = 2200, onboardingComplete = true) }
+        _message.emit("Connected Google Fit & synchronized! 🎉")
     }
 
     private fun computeTdee(p: UserProfileEntity): Int {

@@ -72,6 +72,7 @@ class StepCounterService : Service(), SensorEventListener {
 
     override fun onSensorChanged(event: SensorEvent) {
         if (event.sensor.type != Sensor.TYPE_STEP_COUNTER) return
+        if (CyclingService.liveStats.value.isRecording) return // Ignore steps while cycling is active to prevent road bump false counts
 
         val totalSinceReboot = event.values[0].toInt()
         val today = LocalDate.now().toString()

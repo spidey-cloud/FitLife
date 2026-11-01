@@ -108,6 +108,28 @@ data class UserProfileEntity(
     val onboardingComplete: Boolean = false
 )
 
+@Entity(tableName = "trips")
+data class TripEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val startTime: Long,
+    val endTime: Long = 0,
+    val distanceMeters: Double = 0.0,
+    val durationMs: Long = 0,
+    val avgSpeed: Float = 0f
+)
+
+@Entity(tableName = "track_points")
+data class TrackPointEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val tripId: Long,
+    val lat: Double,
+    val lng: Double,
+    val altitude: Double = 0.0,
+    val speed: Float = 0f,
+    val accuracy: Float = 0f,
+    val time: Long
+)
+
 // ═══════════════════════════════════════════════════════════════════════
 // DAOs
 // ═══════════════════════════════════════════════════════════════════════
@@ -124,13 +146,7 @@ interface StepsDao {
     suspend fun getLast7Days(): List<DailyStepsEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsert(entity: DailyStepsEntity)
-
-    @Query("SELECT SUM(steps) FROM daily_steps WHERE date >= :fromDate")
-    suspend fun totalStepsSince(fromDate: String): Int?
-
-    @Query("SELECT COUNT(*) FROM daily_steps WHERE steps >= :goal AND date >= :fromDate")
-    suspend fun daysGoalMetSince(goal: Int, fromDate: String): Int
+    suspend fun upsert(entry: DailyStepsEntity)
 }
 
 @Dao
@@ -138,44 +154,32 @@ interface WorkoutDao {
     @Query("SELECT * FROM workouts ORDER BY date DESC")
     fun observeAll(): Flow<List<WorkoutEntity>>
 
-    @Query("SELECT * FROM workouts WHERE date = :date ORDER BY id DESC")
+    @Query("SELECT * FROM workouts WHERE date = :date")
     fun observeByDate(date: String): Flow<List<WorkoutEntity>>
 
-    @Query("SELECT * FROM workouts WHERE date >= :fromDate ORDER BY date DESC")
-    suspend fun getFrom(fromDate: String): List<WorkoutEntity>
+    @Query("SELECT * FROM exercises WHERE workoutId = :workoutId")
+    fun observeExercises(workoutId: Long): Flow<List<ExerciseEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(workout: WorkoutEntity): Long
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertExercise(exercise: ExerciseEntity): Long
+
     @Update
     suspend fun update(workout: WorkoutEntity)
 
-    @Delete
-    suspend fun delete(workout: WorkoutEntity)
+    @Query("DELETE FROM exercises WHERE workoutId = :workoutId")
+    suspend fun deleteExercisesForWorkout(workoutId: Long)
 
     @Query("DELETE FROM workouts WHERE id = :id")
     suspend fun deleteById(id: Long)
-
-    @Query("SELECT * FROM exercises WHERE workoutId = :workoutId ORDER BY id")
-    fun observeExercises(workoutId: Long): Flow<List<ExerciseEntity>>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertExercise(exercise: ExerciseEntity)
-
-    @Delete
-    suspend fun deleteExercise(exercise: ExerciseEntity)
-
-    @Query("DELETE FROM exercises WHERE workoutId = :workoutId")
-    suspend fun deleteExercisesForWorkout(workoutId: Long)
 }
 
 @Dao
 interface FoodLogDao {
-    @Query("SELECT * FROM food_log WHERE date = :date ORDER BY mealType, id")
+    @Query("SELECT * FROM food_log WHERE date = :date")
     fun observeByDate(date: String): Flow<List<FoodLogEntity>>
-
-    @Query("SELECT * FROM food_log WHERE date >= :fromDate ORDER BY date DESC")
-    fun observeFrom(fromDate: String): Flow<List<FoodLogEntity>>
 
     @Query("SELECT SUM(calories) FROM food_log WHERE date = :date")
     fun observeTotalCalories(date: String): Flow<Int?>
@@ -192,26 +196,20 @@ interface FoodLogDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(food: FoodLogEntity): Long
 
-    @Delete
-    suspend fun delete(food: FoodLogEntity)
-
     @Query("DELETE FROM food_log WHERE id = :id")
     suspend fun deleteById(id: Long)
 }
 
 @Dao
 interface DietPlanDao {
+    @Query("SELECT * FROM diet_plans")
+    fun observeAll(): Flow<List<DietPlanEntity>>
+
     @Query("SELECT * FROM diet_plans WHERE isActive = 1 LIMIT 1")
     fun observeActivePlan(): Flow<DietPlanEntity?>
 
-    @Query("SELECT * FROM diet_plans ORDER BY id DESC")
-    fun observeAll(): Flow<List<DietPlanEntity>>
-
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(plan: DietPlanEntity): Long
-
-    @Update
-    suspend fun update(plan: DietPlanEntity)
 
     @Query("UPDATE diet_plans SET isActive = 0")
     suspend fun deactivateAll()
@@ -262,6 +260,33 @@ interface ProfileDao {
     suspend fun upsert(profile: UserProfileEntity)
 }
 
+@Dao
+interface TripDao {
+    @Query("SELECT * FROM trips ORDER BY startTime DESC")
+    fun observeTrips(): Flow<List<TripEntity>>
+
+    @Query("SELECT * FROM trips WHERE id = :tripId")
+    suspend fun getTripById(tripId: Long): TripEntity?
+
+    @Query("SELECT * FROM track_points WHERE tripId = :tripId ORDER BY time ASC")
+    suspend fun getPointsForTrip(tripId: Long): List<TrackPointEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTrip(trip: TripEntity): Long
+
+    @Update
+    suspend fun updateTrip(trip: TripEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTrackPoint(point: TrackPointEntity): Long
+
+    @Query("DELETE FROM trips WHERE id = :tripId")
+    suspend fun deleteTrip(tripId: Long)
+
+    @Query("DELETE FROM track_points WHERE tripId = :tripId")
+    suspend fun deletePointsForTrip(tripId: Long)
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // DATABASE
 // ═══════════════════════════════════════════════════════════════════════
@@ -275,9 +300,11 @@ interface ProfileDao {
         DietPlanEntity::class,
         SleepLogEntity::class,
         WellbeingLogEntity::class,
-        UserProfileEntity::class
+        UserProfileEntity::class,
+        TripEntity::class,
+        TrackPointEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class FitLifeDatabase : RoomDatabase() {
@@ -288,4 +315,5 @@ abstract class FitLifeDatabase : RoomDatabase() {
     abstract fun sleepDao(): SleepDao
     abstract fun wellbeingDao(): WellbeingDao
     abstract fun profileDao(): ProfileDao
+    abstract fun tripDao(): TripDao
 }

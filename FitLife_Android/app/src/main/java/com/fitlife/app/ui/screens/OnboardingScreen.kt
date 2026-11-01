@@ -67,7 +67,7 @@ fun OnboardingScreen(vm: FitnessViewModel) {
                 slideInHorizontally { it } + fadeIn() togetherWith slideOutHorizontally { -it } + fadeOut()
             }, label = "ob_step") { currentStep ->
                 when (currentStep) {
-                    0 -> WelcomeStep()
+                    0 -> WelcomeStep(onConnectGoogleFit = { vm.connectGoogleFitAndSkip() })
                     1 -> ProfileStep(name, age, sex, height, weight,
                         onName={name=it}, onAge={age=it}, onSex={sex=it}, onHeight={height=it}, onWeight={weight=it})
                     2 -> GoalStep(weightGoal, activityLevel, onGoal={weightGoal=it}, onActivity={activityLevel=it})
@@ -113,7 +113,7 @@ fun OnboardingScreen(vm: FitnessViewModel) {
 }
 
 @Composable
-private fun WelcomeStep() {
+private fun WelcomeStep(onConnectGoogleFit: () -> Unit) {
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Spacer(Modifier.height(16.dp))
         Surface(
@@ -133,11 +133,22 @@ private fun WelcomeStep() {
         Text("Your all-in-one fitness companion.\nSteps · Workouts · Calories · Diet · Wellbeing",
             style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 24.sp)
-        Spacer(Modifier.height(36.dp))
+        Spacer(Modifier.height(24.dp))
         FeatureRow(Icons.Outlined.DirectionsWalk, "Step Counter", "Track steps with Google Health Connect")
         FeatureRow(Icons.Outlined.FitnessCenter, "Workout Planner", "Log exercises and track progress")
         FeatureRow(Icons.Outlined.Restaurant, "Calorie & Diet", "Monitor nutrition and macro targets")
         FeatureRow(Icons.Outlined.Favorite, "Digital Wellbeing", "Sleep, mood, water and mindfulness")
+        Spacer(Modifier.height(20.dp))
+        Button(
+            onClick = onConnectGoogleFit,
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.primary)
+        ) {
+            Icon(Icons.Outlined.Link, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Connect Google Fit & Skip Setup", fontWeight = FontWeight.Bold)
+        }
     }
 }
 

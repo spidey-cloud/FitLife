@@ -1,77 +1,95 @@
 # 🏋️ FitLife — All-in-One Fitness Tracker for Android
 
-**FitLife** is a modern, feature-rich Android fitness application built entirely with **Kotlin** and **Jetpack Compose**. It brings step tracking, workout management, calorie logging, diet planning, and wellbeing monitoring into a single, beautifully designed Material 3 interface.
+**FitLife** is a modern, feature-rich Android fitness application built entirely with **Kotlin** and **Jetpack Compose**. It brings daily activity overview, step tracking, workout management, live GPS cycling tracking, calorie logging, diet planning, user profiling, and wellbeing monitoring into a single, beautifully designed Material 3 interface.
 
 ---
 
 ## ✨ Key Features
 
+### 🏠 Today Dashboard
+- **Consolidated Daily Hub**: View all your vital health metrics in one single dashboard
+- Live step progress ring with goal achievement percentage
+- Calorie burn balance (Consumed vs TDEE Target & Exercise Burn)
+- Quick hydration logging (+1 glass counter)
+- Current workout routine status and quick action shortcut
+- Profile avatar shortcut for instant user settings access
+
 ### 🚶 Step Tracking
-- **Real-time step counting** via a hardware step-counter foreground service
+- **Real-time hardware step counting** via `StepCounterService` (foreground service)
 - Automatic calorie burn, distance, and active-minutes estimation
 - Daily step goal with animated circular progress ring
 - 30-day step history with interactive bar charts
 - Streak tracking (consecutive days of goal achievement)
-- Manual step entry with date selection
-- Syncs bi-directionally with **Google Health Connect**
+- Manual step entry with date selection dialog
+- Bi-directional sync with **Google Health Connect** using best-of-source (`maxOf`) sync logic
 
-### 💪 Workout Management
-- Create custom workouts with multiple exercises (sets × reps)
+### 🏋️ Workout Management
+- Create custom workouts with multiple exercises (sets × reps × weight)
 - Pre-built workout templates: Push Day, Pull Day, Leg Day, Morning Yoga, 5K Run
 - Workout categories: Strength, Cardio, HIIT, Yoga, Flexibility, Custom
-- Track workout completion and duration
-- Workout sessions auto-sync to Health Connect
+- Active workout runner with set checklists and configurable rest timers (30s / 60s / 90s)
+- **1RM Estimator**: Auto-calculates One-Rep Max using the Brzycki formula
+- Track workout completion, duration, and MET-based calorie burn
+- Workout sessions auto-sync to Health Connect (`ExerciseSessionRecord`)
 
-### 🔥 Calorie & Macro Tracking
+### 🚴 Outdoor & Indoor Cycling Tracker
+- **Real-time GPS tracking** via `CyclingService` (foreground service)
+- Live speed gauge (km/h), max speed, distance (km), duration stopwatch, and elevation gain
+- **Smart Auto-Pause**: Automatically pauses tracking when stationary (>5 seconds at < 1 km/h)
+- **Interactive Route Map**: Renders live route polylines using `GoogleMapsView`
+- Saves trip summaries to `TripEntity` and route coordinates to `TrackPointEntity` in Room DB
+
+### 🥗 Calorie & Macro Tracking
 - Log food by meal (Breakfast, Lunch, Dinner, Snack)
 - **100+ built-in food database** covering proteins, dairy, grains, fruits, vegetables, legumes, nuts, oils, snacks, drinks, and fast food
-- Live search with **Open Food Facts API** integration for thousands of additional foods
+- Live network search with **Open Food Facts REST API** integration
+- **ML Kit Barcode Scanner**: Instant product lookup via camera barcode scanning
 - Real-time macro dashboard: protein, carbs, fat with progress bars
 - Adjustable serving sizes with auto-scaled macros
 - TDEE (Total Daily Energy Expenditure) auto-calculated from profile
 
 ### 🥗 Diet Planning
 - Create and manage multiple diet plans with calorie and macro targets
-- Quick-start templates: Fat Loss, Muscle Gain, Maintenance, Keto
-- Activate/deactivate plans — active plan drives daily calorie goals
-- Visual adherence tracking against the active plan
+- Quick-start templates: Fat Loss (-500 kcal), Muscle Gain (+300 kcal), Maintenance, Keto
+- Custom macro percentage allocator (Protein / Carbs / Fat)
+- Activate/deactivate plans — active plan automatically drives daily calorie goals across the app
 
 ### 🧘 Wellbeing Dashboard
-- **Sleep tracking**: log bed time, wake time, and quality rating; 14-day history
+- **Sleep tracking**: log bed time, wake time, duration, and quality rating (1–5 stars); 14-day visual history
 - **Water intake**: glass-by-glass counter with hydration reminders every 2 hours
-- **Mood & stress logging**: emoji-based mood selector (1–5 scale)
-- **Meditation minutes**: track daily mindfulness sessions
-- AI-generated wellbeing insights based on logged data
+- **Mood & stress logging**: emoji-based mood selector (1–5 scale) and stress slider (1–10) with journal notes
+- **Mindfulness timer**: track daily meditation sessions with ambient background sound toggle
 
-### 📋 Onboarding & Personalization
-- 4-step guided onboarding wizard (Welcome → Profile → Goals → Step Goal)
-- Collects: name, age, sex, height, weight, weight goal, activity level
-- Calculates personalized TDEE using Mifflin-St Jeor equation
-- Daily step goal slider (1,000–25,000 steps)
+### 👤 Profile & Personalization
+- Guided 4-step onboarding wizard (Welcome → Profile → Goals → Daily Step Target)
+- Collects: name, date of birth, sex, height, weight, weight goal, activity level
+- Calculates personalized TDEE using the **Mifflin-St Jeor equation**
+- Interactive daily step goal slider (1,000–25,000 steps)
+- **Data Export & Privacy**: Export health data to JSON file or perform a complete data reset
 
 ### 🔔 Smart Notifications
-- **Step reminder** at 7 PM if you're below 80% of your daily goal
+- **Step reminder** at 7:00 PM if you're below 80% of your daily step goal
 - **Water reminder** every 2 hours if you've logged fewer than 4 glasses
-- Silent foreground notification showing live step count
+- **Live status notifications**: Silent foreground notification showing live steps and GPS cycling telemetry
 
 ---
 
 ## 🏗️ Architecture
 
-FitLife follows the **MVVM (Model-View-ViewModel)** architecture pattern with clean separation of concerns:
+FitLife follows the **Clean MVVM (Model-View-ViewModel)** architecture pattern with unidirectional data flow:
 
 ```
 ┌──────────────────────────────────────────────────────────┐
 │                     UI Layer                             │
 │  Jetpack Compose Screens + Reusable Components           │
-│  (StepsScreen, WorkoutScreen, CaloriesScreen, etc.)      │
+│  (Today, Steps, Workout, Cycling, Calories, Profile)     │
 └────────────────────────┬─────────────────────────────────┘
                          │
                          ▼
 ┌──────────────────────────────────────────────────────────┐
 │                  ViewModel Layer                         │
-│  FitnessViewModel (single shared ViewModel)              │
-│  UI state models: StepsUiState, WorkoutUiState, etc.     │
+│  FitnessViewModel & CyclingViewModel (@HiltViewModel)    │
+│  UI State Flows: StepsUiState, WorkoutUiState, etc.     │
 └────────────────────────┬─────────────────────────────────┘
                          │
                          ▼
@@ -83,18 +101,19 @@ FitLife follows the **MVVM (Model-View-ViewModel)** architecture pattern with cl
                          │
                          ▼
 ┌──────────────────────────────────────────────────────────┐
-│                  Data Layer                               │
-│  Room Database (fitlife_v1.db)                           │
-│  8 Entities · 7 DAOs · DataStore Preferences             │
+│          Data Layer & Services / Workers                 │
+│  Room Database (fitlife_v1.db - 10 Entities · 9 DAOs)    │
+│  Foreground Services (StepCounterService, CyclingService)│
+│  WorkManager (DailySyncWorker, StepReminder, Water)      │
 └──────────────────────────────────────────────────────────┘
 ```
 
 ### Dependency Injection
 
 All dependencies are wired through **Dagger Hilt**:
-- `AppModule` provides the Room database and all 7 DAOs as singletons
-- `FoodRepository` and `FitnessRepository` use `@Inject constructor()`
-- Workers use `@HiltWorker` with `@AssistedInject`
+- `AppModule` provides the Room database and all 9 DAOs as singletons
+- `FoodRepository`, `FitnessRepository`, and `HealthConnectManager` use `@Inject constructor()`
+- Background workers use `@HiltWorker` with `@AssistedInject`
 
 ---
 
@@ -104,18 +123,20 @@ All dependencies are wired through **Dagger Hilt**:
 |---|---|
 | **Language** | Kotlin 1.9.24 |
 | **UI Framework** | Jetpack Compose (BOM 2024.09) |
-| **Design System** | Material 3 (Material You) with dynamic color |
+| **Design System** | Material 3 (Material You) with dynamic color & adaptive icons |
 | **Navigation** | Navigation Compose 2.8.1 |
 | **DI** | Dagger Hilt 2.48 |
-| **Local Database** | Room 2.6.1 |
+| **Local Database** | Room 2.6.1 (10 Entities / 9 DAOs) |
 | **Health Data** | Health Connect Client 1.0.0-alpha11 |
+| **Location & Maps** | FusedLocationProviderClient & Google Maps Compose |
+| **Vision API** | Google ML Kit Barcode Scanning |
 | **Background Work** | WorkManager 2.9.1 |
-| **Preferences** | DataStore Preferences 1.1.1 |
+| **Preferences** | DataStore Preferences 1.1.1 & SharedPreferences |
 | **Charts** | Vico (Compose M3) 1.15.0 |
 | **Image Loading** | Coil Compose 2.7.0 |
 | **Permissions** | Accompanist Permissions 0.36.0 |
 | **Async** | Kotlin Coroutines 1.8.1 |
-| **Food API** | Open Food Facts (free, no API key needed) |
+| **Food API** | Open Food Facts REST API (free, no API key needed) |
 | **Min SDK** | 26 (Android 8.0 Oreo) |
 | **Target SDK** | 35 (Android 15) |
 | **Java Target** | JVM 17 |
@@ -132,12 +153,12 @@ FitLife_Android/
 │       ├── AndroidManifest.xml
 │       ├── java/com/fitlife/app/
 │       │   ├── FitLifeApp.kt              # Application class (Hilt + WorkManager init)
-│       │   ├── MainActivity.kt            # Single activity, navigation host, bottom bar
+│       │   ├── MainActivity.kt            # Single activity, navigation host, 5-tab bottom bar
 │       │   ├── di/
-│       │   │   └── AppModule.kt           # Hilt module — DB + DAO providers
+│       │   │   └── AppModule.kt           # Hilt module — DB + 9 DAO providers
 │       │   ├── data/
 │       │   │   ├── local/
-│       │   │   │   └── Database.kt        # Room DB, 8 entities, 7 DAOs
+│       │   │   │   └── Database.kt        # Room DB, 10 entities, 9 DAOs
 │       │   │   ├── healthconnect/
 │       │   │   │   └── HealthConnectManager.kt  # Read/write Health Connect data
 │       │   │   ├── food/
@@ -145,47 +166,54 @@ FitLife_Android/
 │       │   │   └── repository/
 │       │   │       └── FitnessRepository.kt  # Central data coordinator
 │       │   ├── service/
-│       │   │   └── StepCounterService.kt  # Foreground service (hardware pedometer)
+│       │   │   ├── StepCounterService.kt  # Foreground service (hardware pedometer)
+│       │   │   └── CyclingService.kt      # Foreground service (GPS speed, distance, route)
 │       │   ├── worker/
 │       │   │   └── Workers.kt             # DailySyncWorker, StepReminder, WaterReminder
 │       │   └── ui/
 │       │       ├── theme/
 │       │       │   └── Theme.kt           # Material 3 color schemes (light + dark)
 │       │       ├── components/
-│       │       │   └── Components.kt      # Reusable composables (RingProgress, BarChart, etc.)
+│       │       │   ├── Components.kt      # Reusable composables (RingProgress, BarChart, etc.)
+│       │       │   └── GoogleMapsView.kt  # Google Maps route polyline composable
 │       │       ├── viewmodel/
-│       │       │   └── FitnessViewModel.kt # Shared ViewModel for all screens
+│       │       │   ├── FitnessViewModel.kt # Shared ViewModel for all screens
+│       │       │   └── CyclingViewModel.kt # Telemetry & route recording ViewModel
 │       │       └── screens/
 │       │           ├── OnboardingScreen.kt   # 4-step setup wizard
 │       │           ├── PermissionScreen.kt   # Runtime permission requests
-│       │           ├── StepsScreen.kt        # Step counter + history
-│       │           ├── WorkoutScreen.kt      # Workout builder + templates
-│       │           ├── CaloriesScreen.kt     # Food logging + macro tracking
+│       │           ├── TodayScreen.kt        # Consolidated daily Overview dashboard
+│       │           ├── StepsScreen.kt        # Step counter + 30-day history chart
+│       │           ├── WorkoutScreen.kt      # Workout builder + active session runner
+│       │           ├── CyclingScreen.kt      # Live GPS speed gauge, distance, route map
+│       │           ├── CaloriesScreen.kt     # Food logging, barcode scan, macro tracking
 │       │           ├── DietScreen.kt         # Diet plan management
-│       │           └── WellbeingScreen.kt    # Sleep, water, mood, meditation
-│       └── res/                              # Drawables, mipmaps, themes, strings
-├── build.gradle.kts                          # Root build config (plugin versions)
+│       │           ├── WellbeingScreen.kt    # Sleep, water, mood, meditation
+│       │           └── ProfileScreen.kt      # TDEE recalculation, goals, data export
+│       └── res/                              # Drawables, mipmaps, themes, adaptive icons
+├── build.gradle.kts                          # Root build config
 ├── settings.gradle.kts                       # Project settings
-├── gradle.properties                         # Gradle & Android build flags
-└── keystores/                                # Signing keystore (release builds)
+└── gradle.properties                         # Gradle build flags
 ```
 
 ---
 
 ## 📊 Database Schema
 
-The Room database (`fitlife_v1.db`) contains **8 entities**:
+The Room database (`fitlife_v1.db`) contains **10 entities**:
 
 | Entity | Description | Key Fields |
 |---|---|---|
-| `DailyStepsEntity` | Daily step records | date, steps, caloriesBurned, distanceMeters, activeMinutes |
-| `WorkoutEntity` | Workout sessions | name, category, date, durationMin, completed |
-| `ExerciseEntity` | Individual exercises within a workout | workoutId, name, sets, reps, weightKg |
-| `FoodLogEntity` | Individual food log entries | date, meal, name, calories, protein, carbs, fat, servingG |
-| `DietPlanEntity` | Diet plan definitions | name, dailyCalories, proteinG, carbsG, fatG, isActive |
-| `SleepLogEntity` | Sleep records | date, bedTime, wakeTime, hours, quality |
-| `WellbeingLogEntity` | Daily wellbeing metrics | date, waterGlasses, mood, stressLevel, meditationMinutes |
-| `UserProfileEntity` | User profile & goals | name, age, sex, heightCm, weightKg, goal, activityLevel, dailyStepGoal, tdee |
+| `DailyStepsEntity` | Daily step records | date, steps, caloriesBurned, distanceMeters, activeMinutes, syncedWithFit |
+| `WorkoutEntity` | Workout sessions | name, category, date, durationMinutes, caloriesBurned, completed, templateId |
+| `ExerciseEntity` | Individual exercises within a workout | workoutId, name, sets, repsPerSet, weightKg, durationSeconds |
+| `FoodLogEntity` | Individual food log entries | date, mealType, foodName, calories, proteinG, carbsG, fatG, servingGrams, barcode |
+| `DietPlanEntity` | Diet plan definitions | name, goal, dailyCalorieTarget, proteinTargetG, carbsTargetG, fatTargetG, isActive |
+| `SleepLogEntity` | Sleep records | date, bedtimeHour, bedtimeMinute, wakeHour, wakeMinute, durationMinutes, qualityRating |
+| `WellbeingLogEntity` | Daily wellbeing metrics | date, moodScore, stressLevel, waterGlasses, meditationMinutes, notes |
+| `UserProfileEntity` | User profile & goals | name, dateOfBirth, sex, heightCm, weightKg, dailyStepGoal, dailyCalorieGoal, dailyWaterGoal, weightGoal, activityLevel, onboardingComplete |
+| `TripEntity` | GPS cycling trip records | id, startTime, endTime, distanceMeters, durationMs, avgSpeed |
+| `TrackPointEntity` | Individual GPS route coordinates | id, tripId, lat, lng, altitude, speed, accuracy, time |
 
 ---
 
@@ -196,10 +224,10 @@ FitLife integrates with [Health Connect](https://developer.android.com/health-an
 | Data Type | Read | Write |
 |---|:---:|:---:|
 | Steps | ✅ | ✅ |
-| Active Calories Burned | ✅ | — |
-| Sleep Sessions | ✅ | — |
-| Exercise Sessions | — | ✅ |
-| Nutrition | — | ✅ |
+| Active Calories Burned | ✅ | ✅ |
+| Exercise Sessions | ✅ | ✅ |
+| Nutrition | ✅ | ✅ |
+| Sleep Sessions | ✅ | ✅ |
 | Heart Rate | ✅ | — |
 | Weight | ✅ | ✅ |
 
@@ -241,50 +269,33 @@ FitLife integrates with [Health Connect](https://developer.android.com/health-an
 
 ### Permissions
 
-On first launch, the app will ask for:
-- **Activity Recognition** — for step counting
-- **Health Connect** — for syncing health data
-- **Notifications** — for step and water reminders
-- **Camera** (optional) — reserved for future barcode scanning
+On first launch, the app requests runtime permissions for:
+- **Activity Recognition** — hardware step counting
+- **Location (Fine/Coarse)** — real-time GPS speed and cycling route mapping
+- **Health Connect** — syncing steps, workouts, nutrition, and sleep
+- **Notifications** — daily step nudges and hydration alerts
 
 ---
 
-## 🎨 Theming
+## 🎨 Theming & Icons
 
 FitLife uses **Material 3 / Material You** with:
-- **Dynamic Color** support on Android 12+ (colors adapt to your wallpaper)
-- **Light & Dark mode** that follows system settings
-- Custom fallback color schemes with a fitness-inspired blue/teal palette
-- Brand accent colors: Blue, Teal, Orange, Green, Purple, Red
+- **Dynamic Color** support on Android 12+ (colors adapt to wallpaper)
+- **Light & Dark mode** with pure black (`#000000`) background optimization
+- Custom accent colors: FitLife Lime (`#CCFF00`), Teal (`#00897B`), Blue (`#1565C0`)
+- **Adaptive Icon Suite**: Vector background, foreground logo, and Android 13+ monochrome themed launcher icon (`ic_launcher_monochrome.xml`)
 
 ---
 
-## 🔧 Background Services
+## 🔧 Background Services & Workers
 
 | Service / Worker | Schedule | Purpose |
 |---|---|---|
-| `StepCounterService` | Always-on (foreground) | Reads hardware step sensor, persists to Room DB |
-| `DailySyncWorker` | Every 1 hour | Syncs steps from Health Connect to local DB |
-| `StepReminderWorker` | Daily at 7:00 PM | Notifies if below 80% of step goal |
-| `WaterReminderWorker` | Every 2 hours | Notifies if fewer than 4 glasses logged |
-
----
-
-## 🧩 Reusable UI Components
-
-The app includes a library of reusable composables in `Components.kt`:
-
-| Component | Description |
-|---|---|
-| `RingProgress` | Animated circular progress ring with customizable stroke and colors |
-| `AnimatedProgressBar` | Smooth animated horizontal progress bar |
-| `StatCard` | Compact stat display card with label, value, and unit |
-| `SectionCard` | Section container with title, subtitle, and trailing action |
-| `MacroRow` | Macro nutrient progress bar (protein/carbs/fat) |
-| `BarChart` | Custom bar chart for step/calorie history |
-| `EmptyState` | Placeholder for empty lists with emoji, title, and subtitle |
-| `StreakBadge` | Animated streak counter badge |
-| `MoodSelector` | Emoji-based mood picker (1–5 scale) |
+| `StepCounterService` | Foreground Service (`FOREGROUND_SERVICE_DATA_SYNC`) | Hardware pedometer sensor listener & DB updates |
+| `CyclingService` | Foreground Service | Real-time GPS location tracking, speed gauge, route mapping |
+| `DailySyncWorker` | Periodic (Every 1 hour) | Background step sync with Health Connect |
+| `StepReminderWorker` | Daily at 7:00 PM | Sends notification nudge if step progress < 80% |
+| `WaterReminderWorker` | Periodic (Every 2 hours) | Sends hydration alert if water intake < 4 glasses |
 
 ---
 
@@ -293,20 +304,20 @@ The app includes a library of reusable composables in `Components.kt`:
 ```
 Launch
   │
-  ├─ First Time? → Onboarding (4 steps) → Permission Screen → Main App
+  ├─ First Time? → Permission Screen → Onboarding Wizard (4 steps) → Main App
   │
   └─ Returning User → Permission Check → Main App
                                               │
                                               ▼
-                                    ┌─────────────────┐
-                                    │   Bottom Nav     │
-                                    ├─────┬─────┬─────┤
-                                    │Steps│Work │Cals │
-                                    │     │ out │     │
-                                    ├─────┼─────┼─────┤
-                                    │Diet │Well │     │
-                                    │     │being│     │
-                                    └─────┴─────┴─────┘
+                                    ┌───────────────────┐
+                                    │    Bottom Nav     │
+                                    ├─────┬─────┬───────┤
+                                    │Today│Steps│Workout│
+                                    │ 🏠  │ 🚶  │  🏋️   │
+                                    ├─────┼─────┼───────┤
+                                    │Cycle│Cals │Profile│
+                                    │ 🚴  │ 🥗  │  👤   │
+                                    └─────┴─────┴───────┘
 ```
 
 ---
